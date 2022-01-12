@@ -109,23 +109,12 @@ static irqreturn_t xilaxitimer_isr(int irq,void*dev_id)
 
 	// Check Timer Counter Value
 	data = ioread32(tp->base_addr + XIL_AXI_TIMER_TCR_OFFSET);
-	printk(KERN_INFO "xilaxitimer_isr: Interrupt %d occurred !\n",i_cnt);
 
 	// Clear Interrupt
 	data = ioread32(tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
 	iowrite32(data | XIL_AXI_TIMER_CSR_INT_OCCURED_MASK,
 			tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
 
-	// Increment number of interrupts that have occured
-	i_cnt++;
-	// Disable Timer after i_num interrupts
-	if (i_cnt>=i_num)
-	{
-		printk(KERN_NOTICE "xilaxitimer_isr: All of the interrupts have occurred. Disabling timer\n");
-		data = ioread32(tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
-		iowrite32(data & ~(XIL_AXI_TIMER_CSR_ENABLE_TMR_MASK), tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
-		i_cnt = 0;
-	}
 
 	return IRQ_HANDLED;
 }
@@ -283,33 +272,33 @@ ssize_t timer_read(struct file *pfile, char __user *buffer, size_t length, loff_
 ssize_t timer_write(struct file *pfile, const char __user *buffer, size_t length, loff_t *offset) 
 {
 	char buff[BUFF_SIZE];
-	int millis = 0;
-	int number = 0;
+	char input[6];
 	int ret = 0;
 	ret = copy_from_user(buff, buffer, length);
 	if(ret)
 		return -EFAULT;
 	buff[length] = '\0';
 
-	ret = sscanf(buff,"%d,%d",&number,&millis);
-	if(ret == 2)//two parameters parsed in sscanf
+	ret = sscanf(buff,"%s",input);
+	if(ret == 1)//two parameters parsed in sscanf
 	{
 
-		if (millis > 40000)
+		if (input[0] == 's' && input[1] == 't' && input[2] == 'a' && input[3] == 'r' && input[4] == 't')
 		{
-			printk(KERN_WARNING "xilaxitimer_write: Maximum period exceeded, enter something less than 40000 \n");
+			printk(KERN_INFO "xilaxitimer_write: Stopwatch started\n");
+			//start stopwatch
 		}
-		else
+		else if (input[0] == 's' && input[1] == 't' && input[2] == 'o' && input[3] == 'p')
 		{
-			printk(KERN_INFO "xilaxitimer_write: Starting timer for %d interrupts. One every %d miliseconds \n",number,millis);
-			i_num = number;
-			setup_and_start_timer(millis);
+			printk(KERN_INFO "xilaxitimer_write: Stopwatch stoped\n");
+			//stop stopwatch
 		}
+		else 
 
 	}
 	else
 	{
-		printk(KERN_WARNING "xilaxitimer_write: Wrong format, expected n,t \n\t n-number of interrupts\n\t t-time in ms between interrupts\n");
+		printk(KERN_WARNING "xilaxitimer_write: Wrong format, expected one of the following commands start, stop, reset\n"); 
 	}
 	return length;
 }
