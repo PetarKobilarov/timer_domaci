@@ -306,8 +306,9 @@ int timer_close(struct inode *pinode, struct file *pfile)
 
 ssize_t timer_read(struct file *pfile, char __user *buffer, size_t length, loff_t *offset) 
 {
-	long long unsigned int time = MSB << 32 | LSB;
-	int hh, mm, ss, ms, us;
+	/*
+	unsigned long long int time = MSB << 32 | LSB;
+	unsigned int hh, mm, ss, ms, us;
 
 	hh = time / 360000000000;
 	time -= hh * 360000000000;
@@ -321,7 +322,7 @@ ssize_t timer_read(struct file *pfile, char __user *buffer, size_t length, loff_
 	time -= us * 100;	
 
 	printk(KERN_INFO "%d : %d : %d . %d , %d \n", hh, mm, ss, ms, us);	
-	
+	*/
 	return 0;
 }
 
