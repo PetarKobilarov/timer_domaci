@@ -22,6 +22,7 @@
 #define XIL_AXI_TIMER_TCSR_OFFSET	0x0
 #define XIL_AXI_TIMER_TLR_OFFSET		0x4
 #define XIL_AXI_TIMER_TCR_OFFSET		0x8
+#define XIL_AXI_TIMER_TCR1_OFFSET		0x18
 
 #define XIL_AXI_TIMER_CSR_CASC_MASK	0x00000800
 #define XIL_AXI_TIMER_CSR_ENABLE_ALL_MASK	0x00000400
@@ -45,6 +46,14 @@ MODULE_AUTHOR ("Xilinx");
 MODULE_DESCRIPTION("Cascade Timer Driver for Zynq PL AXI Timer.");
 MODULE_ALIAS("custom:xilaxitimer");
 
+#define RESET	0
+#define START	1
+#define STOP	2
+
+int startNum = 0;
+unsigned int LSB = 0;
+unsigned int MSB = 0;
+ 
 struct timer_info {
 	unsigned long mem_start;
 	unsigned long mem_end;
@@ -58,12 +67,10 @@ static struct device *my_device;
 static struct cdev *my_cdev;
 static struct timer_info *tp = NULL;
 
-static int i_num = 1;
-static int i_cnt = 0;
-
 
 static irqreturn_t xilaxitimer_isr(int irq,void*dev_id);
-static void setup_and_start_timer(unsigned int milliseconds);
+static void setup_timer(void);
+void timer_command(int command);
 static int timer_probe(struct platform_device *pdev);
 static int timer_remove(struct platform_device *pdev);
 int timer_open(struct inode *pinode, struct file *pfile);
@@ -108,7 +115,8 @@ static irqreturn_t xilaxitimer_isr(int irq,void*dev_id)
 	unsigned int data = 0;
 
 	// Check Timer Counter Value
-	data = ioread32(tp->base_addr + XIL_AXI_TIMER_TCR_OFFSET);
+	LSB = ioread32(tp->base_addr + XIL_AXI_TIMER_TCR_OFFSET);
+	MSB = ioread32(tp->base_addr + XIL_AXI_TIMER_TCR1_OFFSET);
 
 	// Clear Interrupt
 	data = ioread32(tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
@@ -121,40 +129,74 @@ static irqreturn_t xilaxitimer_isr(int irq,void*dev_id)
 //***************************************************
 //HELPER FUNCTION THAT RESETS AND STARTS TIMER WITH PERIOD IN MILISECONDS
 
-static void setup_and_start_timer(unsigned int milliseconds)
+static void setup_timer(void)
 {
 	// Disable Timer Counter
-	unsigned int timer_load;
-	unsigned int zero = 0;
 	unsigned int data = 0;
-	timer_load = zero - milliseconds*100000;
 
 	// Disable timer/counter while configuration is in progress
 	data = ioread32(tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
 	iowrite32(data & ~(XIL_AXI_TIMER_CSR_ENABLE_TMR_MASK),
 			tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
 
-	// Set initial value in load register
-	iowrite32(timer_load, tp->base_addr + XIL_AXI_TIMER_TLR_OFFSET);
-
-	// Load initial value into counter from load register
-	data = ioread32(tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
-	iowrite32(data | XIL_AXI_TIMER_CSR_LOAD_MASK,
-			tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
-
-	data = ioread32(tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
-	iowrite32(data & ~(XIL_AXI_TIMER_CSR_LOAD_MASK),
-			tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
+	//Set timer to cascade mode
+	iowrite32(data & XIL_AXI_TIMER_CSR_CASC_MASK, tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
 
 	// Enable interrupts and autoreload, rest should be zero
 	iowrite32(XIL_AXI_TIMER_CSR_ENABLE_INT_MASK | XIL_AXI_TIMER_CSR_AUTO_RELOAD_MASK,
 			tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
 
+	printk(KERN_INFO "Set timer to cascade mode\n");
 	// Start Timer bz setting enable signal
-	data = ioread32(tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
-	iowrite32(data | XIL_AXI_TIMER_CSR_ENABLE_TMR_MASK,
-			tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
+	//data = ioread32(tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
+	//iowrite32(data | XIL_AXI_TIMER_CSR_ENABLE_TMR_MASK,
+	//		tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
 
+}
+
+//***************************************************
+//Start, stop reset time function
+void timer_command(int command)
+{
+	unsigned int data = 0;
+
+	if(command == START)
+	{
+		if(startNum == 0)
+		{
+			setup_timer();
+			startNum = 1;
+		}
+
+		data = ioread32(tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
+		iowrite32(data | XIL_AXI_TIMER_CSR_ENABLE_TMR_MASK,
+        tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);	
+		printk(KERN_INFO "Stopwatch started\n");
+	}
+	else if(command == STOP)
+	{
+		if(startNum != 0)
+		{
+			data = ioread32(tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
+			iowrite32(data | ~(XIL_AXI_TIMER_CSR_ENABLE_TMR_MASK),
+        	tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
+			printk(KERN_INFO "Stopwatch stoped\n");
+		}
+		else 
+			printk(KERN_WARNING "Stopwatch hasn't been started yet\n");
+	}
+	else
+	{
+		if(startNum != 0)
+		{
+			data = ioread32(tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
+			iowrite32(data | ~(XIL_AXI_TIMER_CSR_ENABLE_TMR_MASK),
+        	tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
+			printk(KERN_INFO "Stopwatch reset\n");
+		}
+		else 
+			printk(KERN_WARNING "Stopwatch hasn't been started yet\n");
+	}
 }
 
 //***************************************************
@@ -264,8 +306,22 @@ int timer_close(struct inode *pinode, struct file *pfile)
 
 ssize_t timer_read(struct file *pfile, char __user *buffer, size_t length, loff_t *offset) 
 {
+	long long unsigned int time = MSB << 32 | LSB;
+	int hh, mm, ss, ms, us;
 
-	//printk(KERN_INFO "Succesfully read timer\n");
+	hh = time / 360000000000;
+	time -= hh * 360000000000;
+	mm = time / 6000000000;
+	time -= mm * 6000000000;
+	ss = time / 100000000;
+	time -= ss * 100000000;
+	ms = time / 100000;
+	time -= ms * 100000;
+	us = time / 100;
+	time -= us * 100;	
+
+	printk(KERN_INFO "%d : %d : %d . %d , %d \n", hh, mm, ss, ms, us);	
+	
 	return 0;
 }
 
@@ -286,14 +342,18 @@ ssize_t timer_write(struct file *pfile, const char __user *buffer, size_t length
 		if (input[0] == 's' && input[1] == 't' && input[2] == 'a' && input[3] == 'r' && input[4] == 't')
 		{
 			printk(KERN_INFO "xilaxitimer_write: Stopwatch started\n");
-			//start stopwatch
+			timer_command(START);	
 		}
 		else if (input[0] == 's' && input[1] == 't' && input[2] == 'o' && input[3] == 'p')
 		{
 			printk(KERN_INFO "xilaxitimer_write: Stopwatch stoped\n");
-			//stop stopwatch
+			timer_command(STOP);	
 		}
-		else 
+		else if(input[0] == 'r' && input[1] == 'e' && input[2] == 's' && input[3] == 'e' && input[4] == 't')
+		{
+			printk(KERN_INFO "xilaxitimer_write: Stopwatch stoped\n");
+			timer_command(RESET);
+		} 
 
 	}
 	else
@@ -345,7 +405,7 @@ static int __init timer_init(void)
 	printk(KERN_NOTICE "xilaxitimer_init: Hello world\n");
 
 	return platform_driver_register(&timer_driver);
-
+	
 fail_2:
 	device_destroy(my_class, my_dev_id);
 fail_1:
